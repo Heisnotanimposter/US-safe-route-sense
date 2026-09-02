@@ -1,73 +1,92 @@
-# Welcome to your Lovable project
+# US-Safe-Route-Sense
 
-## Project info
+> **Autonomous 3D UAV Skyway UTM & High-Security Urban Ground Navigation Platform**
 
-**URL**: https://lovable.dev/projects/4847a9d4-3bb8-45b1-b946-89eb5791184d
+[![React](https://img.shields.io/badge/React-18.3-blue.svg)](https://reactjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue.svg)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-5.4-646CFF.svg)](https://vitejs.dev/)
+[![MapLibre GL](https://img.shields.io/badge/MapLibre_GL-3D-blueviolet.svg)](https://maplibre.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38B2AC.svg)](https://tailwindcss.com/)
 
-## How can I edit this code?
+---
 
-There are several ways of editing your application.
+## Overview
 
-**Use Lovable**
+**US-Safe-Route-Sense** is an enterprise-grade spatial navigation platform that solves the fatal blind spot of consumer navigation tools (e.g. Google Maps, Waze), which prioritize shortest travel duration while blindly routing vehicles through violent crime corridors and failing to provide 3D regulatory deconfliction for autonomous drones.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/4847a9d4-3bb8-45b1-b946-89eb5791184d) and start prompting.
+The platform provides two flagship navigation modes:
+1. **AeroSafe 3D Skyway (FAA Part 107 UTM)**: Regional autonomous drone corridor planning with 3D altitude profiles (climb, cruise, descent, safety margins), microburst wind-shear buffering, No-Fly Zone (NFZ) deconfliction, battery State-of-Charge (SoC) projection, and acoustic compliance monitoring.
+2. **SafeRoute Guardian Ground Navigation (OSRM Snapped)**: Physical highway and arterial route planning that reroutes around verified violent crime hotspots, carjacking zones, and civil unrest perimeters with real-time **Safe-to-Direct Rate** analytics.
+3. **Mobile & Edge SDK Export**: Ready-to-deploy **Flutter (Dart)** and **iOS (Swift)** spatial routing modules for on-device, offline computation.
 
-Changes made via Lovable will be committed automatically to this repo.
+For comprehensive technical documentation, see [USE_CASES_AND_ARCHITECTURE.md](./USE_CASES_AND_ARCHITECTURE.md).
 
-**Use your preferred IDE**
+---
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Key Features
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- **Full-Bleed 3D Quarter-View Map Engine**: Powered by MapLibre GL with dark Carto tiles, 58° tilt angle, smooth rotation, and interactive pin placement.
+- **Multiple Camera Modes**:
+  - `3D Quarter-View`: 58° pitch overview for strategic corridor awareness.
+  - `Vehicle / Drone Follow`: Real-time tracking camera maintaining heading rotation behind the vehicle.
+  - `Top-Down 2D`: Classic orthographic tactical overview.
+- **Interactive Threat Placement**: Click anywhere on the map to deploy live weather disturbances (wind-shears / storms) or ground crime perimeters and watch routes dynamically recalculate in real time.
+- **Safe-to-Direct Rate Metrics**: Transparent quantification of trade-offs comparing detour percentage against crimes evaded per month.
+- **Drone Altitude Profile HUD**: Real-time SVG graph tracking ground elevation, safety clearances, and drone altitude AGL along the route.
+- **Turn-by-Turn Voice Guidance**: Integrated browser Web Speech API announcing navigational maneuvers and hazard warnings with custom pitch and rate.
+- **Use Cases & Mission Briefing Dialog**: Built-in interactive briefing modal detailing operational profiles, target personas, and regulatory frameworks.
 
-Follow these steps:
+---
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+## Codebase Architecture
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+The project is structured with strict separation of concerns into domain-driven modules:
 
-# Step 3: Install the necessary dependencies.
-npm i
+```
+src/
+├── types/              # Centralized navigation, drone, and ground domain interfaces
+├── hooks/              # Custom React hooks (useNavigationState, useGroundRouting, useDroneRouting, etc.)
+├── components/
+│   ├── map/            # MapLibre GL 3D view, MapMarkers, and MapLayers
+│   ├── hud/            # Modular Tesla Glass Overlay components (TopControlCard, WaypointRouteCard, etc.)
+│   ├── intel/          # Interactive Use Cases & System Briefing modal
+│   ├── analytics/      # Crime and flight telemetry analytics drawer
+│   ├── export/         # Flutter & Swift code export modal
+│   └── ui/             # shadcn-ui components
+├── lib/                # Routing engines (OSRM, 3D AeroSafe), danger databases, and templates
+└── pages/
+    └── Index.tsx       # Clean top-level orchestrator
+```
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+---
+
+## Getting Started
+
+### Prerequisites
+- Node.js (v18+) or Bun
+- npm, pnpm, or bun
+
+### Installation
+```bash
+# Clone the repository
+git clone https://github.com/Heisnotanimposter/US-safe-route-sense.git
+cd US-safe-route-sense
+
+# Install dependencies
+npm install
+
+# Start development server
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Production Build
+```bash
+npm run build
+npm run preview
+```
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
+## License
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/4847a9d4-3bb8-45b1-b946-89eb5791184d) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+This project is licensed under the MIT License.
