@@ -7,7 +7,9 @@ import {
   Smartphone, 
   BookOpen,
   Volume2,
-  VolumeX 
+  VolumeX,
+  Globe,
+  ShieldCheck
 } from 'lucide-react';
 import { CameraMode } from '@/types/navigation';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -20,6 +22,7 @@ interface Props {
   onOpenAnalytics: () => void;
   onOpenMobileExport: () => void;
   onOpenUseCases: () => void;
+  onOpenCompliance?: () => void;
 }
 
 export const ActionToolstrip: React.FC<Props> = ({
@@ -29,7 +32,8 @@ export const ActionToolstrip: React.FC<Props> = ({
   onToggleAudio,
   onOpenAnalytics,
   onOpenMobileExport,
-  onOpenUseCases
+  onOpenUseCases,
+  onOpenCompliance
 }) => {
   return (
     <div className="apple-glass rounded-2xl p-1.5 pointer-events-auto flex items-center gap-1 shadow-2xl border border-white/10">
@@ -91,7 +95,44 @@ export const ActionToolstrip: React.FC<Props> = ({
           </TooltipContent>
         </Tooltip>
 
+        {/* Global Orbital Wide Camera */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => onSetCameraMode('ORBITAL_WIDE')}
+              className={`p-2 rounded-xl text-xs font-semibold transition-colors ${
+                cameraMode === 'ORBITAL_WIDE'
+                  ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 shadow'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Globe className="w-4 h-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="text-xs bg-slate-900 border-white/10 text-slate-200">
+            Orbital Wide Satellite View
+          </TooltipContent>
+        </Tooltip>
+
         <div className="w-[1px] h-4 bg-white/10 mx-0.5" />
+
+        {/* Commercial Compliance & Legal Attribution */}
+        {onOpenCompliance && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onOpenCompliance}
+                className="px-2 py-1.5 rounded-xl text-xs font-semibold transition-colors text-emerald-300 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 flex items-center gap-1.5"
+              >
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span className="hidden sm:inline font-mono text-[11px] font-bold">Licenses</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs bg-slate-900 border-white/10 text-slate-200">
+              Commercial Compliance & Licensing Registry
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Use Cases & Architecture Briefing Button (NEW) */}
         <Tooltip>
