@@ -46,11 +46,15 @@ export const TopControlCard: React.FC<Props> = ({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold shadow-md ${
-            isDrone 
-              ? 'bg-gradient-to-tr from-cyan-500 to-blue-500 text-slate-950 shadow-cyan-500/30' 
-              : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 shadow-emerald-500/30'
+            navMode === 'GLOBAL_OSINT'
+              ? 'bg-gradient-to-tr from-indigo-500 to-cyan-400 text-slate-950 shadow-cyan-500/40'
+              : isDrone 
+                ? 'bg-gradient-to-tr from-cyan-500 to-blue-500 text-slate-950 shadow-cyan-500/30' 
+                : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 shadow-emerald-500/30'
           }`}>
-            {isDrone ? (
+            {navMode === 'GLOBAL_OSINT' ? (
+              <Scan className="w-4 h-4 text-slate-950 stroke-[2.5]" />
+            ) : isDrone ? (
               <Plane className="w-4 h-4 text-slate-950 stroke-[2.5]" />
             ) : (
               <ShieldCheck className="w-4 h-4 text-slate-950 stroke-[2.5]" />
@@ -58,20 +62,37 @@ export const TopControlCard: React.FC<Props> = ({
           </div>
           <div>
             <div className="text-xs font-bold tracking-tight text-white flex items-center gap-1.5">
-              {isDrone ? 'AeroSafe 3D' : 'SafeRoute'} <span className={`${isDrone ? 'text-cyan-400' : 'text-emerald-400'} font-mono`}>Skyway</span>
+              {navMode === 'GLOBAL_OSINT' ? 'AeroGuard' : isDrone ? 'AeroSafe 3D' : 'SafeRoute'}{' '}
+              <span className={`${navMode === 'GLOBAL_OSINT' ? 'text-indigo-400' : isDrone ? 'text-cyan-400' : 'text-emerald-400'} font-mono`}>
+                {navMode === 'GLOBAL_OSINT' ? 'OSINT' : 'Skyway'}
+              </span>
             </div>
             <div className="text-[10px] text-slate-400">
-              {isDrone ? 'Regional 3D UAV Airspace' : 'Physical Road Avoidance'}
+              {navMode === 'GLOBAL_OSINT'
+                ? 'Orbital & Global Telemetry'
+                : isDrone 
+                  ? 'Regional 3D UAV Airspace' 
+                  : 'Physical Road Avoidance'}
             </div>
           </div>
         </div>
 
-        {/* Drone vs Ground Navigation Mode Switcher */}
+        {/* 3-Way Mode Switcher */}
         <div className="flex items-center gap-1 p-0.5 bg-slate-950/60 rounded-full border border-white/10">
           <button
+            onClick={() => onNavModeChange('GLOBAL_OSINT')}
+            className={`px-2 py-1 rounded-full text-[10px] font-semibold transition-all ${
+              navMode === 'GLOBAL_OSINT'
+                ? 'bg-indigo-500 text-slate-950 shadow-md font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            🛰️ OSINT
+          </button>
+          <button
             onClick={() => onNavModeChange('DRONE_SKYWAY')}
-            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
-              isDrone 
+            className={`px-2 py-1 rounded-full text-[10px] font-semibold transition-all ${
+              navMode === 'DRONE_SKYWAY'
                 ? 'bg-cyan-500 text-slate-950 shadow-md font-bold' 
                 : 'text-slate-400 hover:text-white'
             }`}
@@ -80,8 +101,8 @@ export const TopControlCard: React.FC<Props> = ({
           </button>
           <button
             onClick={() => onNavModeChange('GROUND_VEHICLE')}
-            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
-              !isDrone 
+            className={`px-2 py-1 rounded-full text-[10px] font-semibold transition-all ${
+              navMode === 'GROUND_VEHICLE'
                 ? 'bg-emerald-500 text-slate-950 shadow-md font-bold' 
                 : 'text-slate-400 hover:text-white'
             }`}
