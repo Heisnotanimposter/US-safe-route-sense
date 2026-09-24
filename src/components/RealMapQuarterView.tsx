@@ -1,21 +1,33 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { DangerZone, CityPreset, createDangerZonePolygonGeoJSON } from '@/lib/danger-zones';
+import { DangerZone, CityPreset } from '@/lib/danger-zones';
 import { DroneHazardZone, DroneCityCorridor } from '@/lib/drone-hazards';
 import { RouteOption, RouteType } from '@/lib/safe-routing-engine';
 import { DroneRouteOption, DroneRouteProfileType } from '@/lib/drone-routing-engine';
+import { NavMode, CameraMode, PickingMode, GeoPoint } from '@/types/navigation';
+import {
+  SituationalLayerConfig,
+  SatelliteTrack,
+  LiveFlight,
+  SeismicHazard,
+  CriticalFacility,
+  TrafficCCTV,
+  ThermalHotspot
+} from '@/types/situational';
+import { updateOriginPin, updateDestPin, updateVehicleMarkerIcon } from './map/MapMarkers';
+import { getActiveHazardFeatures, setupMapLayers } from './map/MapLayers';
+import { SituationalLayers } from './map/SituationalLayers';
+import { TacticalEntityCard } from './intel/TacticalEntityCard';
 
-export type NavMode = 'DRONE_SKYWAY' | 'GROUND_VEHICLE';
-export type CameraMode = 'QUARTER_VIEW' | 'DRIVER_FOLLOW' | 'TOP_DOWN';
-export type PickingMode = 'NONE' | 'PICK_A' | 'PICK_B' | 'ADD_HAZARD';
+export type { NavMode, CameraMode, PickingMode };
 
 interface Props {
   navMode: NavMode;
   city: CityPreset;
   droneCorridor: DroneCityCorridor;
-  origin: [number, number]; // [lng, lat]
-  destination: [number, number]; // [lng, lat]
+  origin: GeoPoint;
+  destination: GeoPoint;
   groundDangerZones: DangerZone[];
   droneHazards: DroneHazardZone[];
   activeGroundRoute: RouteOption | null;
@@ -32,15 +44,35 @@ interface Props {
   };
   activeGroundRouteType: RouteType;
   activeDroneProfileType: DroneRouteProfileType;
-  onOriginChange: (coords: [number, number]) => void;
-  onDestinationChange: (coords: [number, number]) => void;
-  onAddCustomHazard: (coords: [number, number]) => void;
+  onOriginChange: (coords: GeoPoint) => void;
+  onDestinationChange: (coords: GeoPoint) => void;
+  onAddCustomHazard: (coords: GeoPoint) => void;
   simProgress: number; // 0 to 1
   isSimulating: boolean;
   cameraMode: CameraMode;
   pickingMode: PickingMode;
   onPickingComplete: () => void;
   onVehicleStepChange?: (stepIndex: number) => void;
+  // Situational Telemetry
+  situationalLayers?: SituationalLayerConfig;
+  satellites?: SatelliteTrack[];
+  flights?: LiveFlight[];
+  earthquakes?: SeismicHazard[];
+  facilities?: CriticalFacility[];
+  cctvCameras?: TrafficCCTV[];
+  thermalFires?: ThermalHotspot[];
+  selectedTelemetryEntity?: {
+    type: 'SATELLITE' | 'FLIGHT' | 'EARTHQUAKE' | 'FACILITY' | 'CCTV';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: any;
+  } | null;
+  onSelectTelemetryEntity?: (entity: {
+    type: 'SATELLITE' | 'FLIGHT' | 'EARTHQUAKE' | 'FACILITY' | 'CCTV';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: any;
+  }) => void;
+  onCloseTelemetryEntity?: () => void;
+  onMapCenterChange?: (center: [number, number]) => void;
 }
 
 export const RealMapQuarterView: React.FC<Props> = ({
@@ -55,17 +87,25 @@ export const RealMapQuarterView: React.FC<Props> = ({
   groundRoutes,
   activeDroneRoute,
   droneRoutes,
-  activeGroundRouteType,
-  activeDroneProfileType,
   onOriginChange,
   onDestinationChange,
   onAddCustomHazard,
   simProgress,
-  isSimulating,
   cameraMode,
   pickingMode,
   onPickingComplete,
-  onVehicleStepChange
+  onVehicleStepChange,
+  situationalLayers,
+  satellites = [],
+  flights = [],
+  earthquakes = [],
+  facilities = [],
+  cctvCameras = [],
+  thermalFires = [],
+  selectedTelemetryEntity = null,
+  onSelectTelemetryEntity,
+  onCloseTelemetryEntity,
+  onMapCenterChange
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -76,8 +116,9 @@ export const RealMapQuarterView: React.FC<Props> = ({
   const vehicleMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   const isDrone = navMode === 'DRONE_SKYWAY';
+  const isOsint = navMode === 'GLOBAL_OSINT';
 
-  const activePathCoordinates = isDrone
+  const activePathCoordinates: GeoPoint[] = isDrone
     ? (activeDroneRoute?.pathCoordinates || [])
     : (activeGroundRoute?.pathCoordinates || []);
 
@@ -85,14 +126,37 @@ export const RealMapQuarterView: React.FC<Props> = ({
     ? (activeDroneRoute?.color || '#06b6d4')
     : (activeGroundRoute?.color || '#10b981');
 
-  // Initialize Real MapLibre GL Map
+  const getSafeRouteCoords = useCallback((): GeoPoint[] => {
+    if (isDrone) return droneRoutes?.safe?.pathCoordinates || [];
+    return groundRoutes?.safe?.pathCoordinates || [];
+  }, [isDrone, droneRoutes?.safe, groundRoutes?.safe]);
+
+  const getBalancedRouteCoords = useCallback((): GeoPoint[] => {
+    if (isDrone) return droneRoutes?.rapid?.pathCoordinates || [];
+    return groundRoutes?.balanced?.pathCoordinates || [];
+  }, [isDrone, droneRoutes?.rapid, groundRoutes?.balanced]);
+
+  const getDirectRouteCoords = useCallback((): GeoPoint[] => {
+    if (isDrone) return droneRoutes?.unsafe?.pathCoordinates || [];
+    return groundRoutes?.unsafe?.pathCoordinates || [];
+  }, [isDrone, droneRoutes?.unsafe, groundRoutes?.unsafe]);
+
+  const pickingModeRef = useRef(pickingMode);
+  useEffect(() => {
+    pickingModeRef.current = pickingMode;
+    if (mapContainerRef.current) {
+      mapContainerRef.current.style.cursor = pickingMode !== 'NONE' ? 'crosshair' : 'grab';
+    }
+  }, [pickingMode]);
+
+  // Initialize MapLibre GL Map
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    const initialCenter = isDrone ? droneCorridor.center : city.center;
-    const initialZoom = isDrone ? droneCorridor.zoom : city.zoom;
-    const initialPitch = isDrone ? droneCorridor.pitch : city.pitch;
-    const initialBearing = isDrone ? droneCorridor.bearing : city.bearing;
+    const initialCenter = isOsint ? [-97.7431, 30.2672] : isDrone ? droneCorridor.center : city.center;
+    const initialZoom = isOsint ? 3.0 : isDrone ? droneCorridor.zoom : city.zoom;
+    const initialPitch = isOsint ? 35 : isDrone ? droneCorridor.pitch : city.pitch;
+    const initialBearing = isOsint ? -10 : isDrone ? droneCorridor.bearing : city.bearing;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -130,21 +194,21 @@ export const RealMapQuarterView: React.FC<Props> = ({
 
     mapRef.current = map;
 
-    // 1. Origin 3D SkyPad Marker
+    // 1. Origin SkyPad Marker
     const elA = document.createElement('div');
     updateOriginPin(elA, navMode);
     originMarkerRef.current = new maplibregl.Marker({ element: elA })
       .setLngLat(origin)
       .addTo(map);
 
-    // 2. Destination 3D SkyPad Marker
+    // 2. Destination SkyPad Marker
     const elB = document.createElement('div');
     updateDestPin(elB, navMode);
     destMarkerRef.current = new maplibregl.Marker({ element: elB })
       .setLngLat(destination)
       .addTo(map);
 
-    // 3. 3D Quadcopter Drone / Cyber Vehicle Marker
+    // 3. Vehicle / Drone Marker
     const elVeh = document.createElement('div');
     elVeh.className = 'vehicle-marker flex items-center justify-center transition-transform duration-75';
     updateVehicleMarkerIcon(elVeh, navMode);
@@ -153,11 +217,27 @@ export const RealMapQuarterView: React.FC<Props> = ({
       .addTo(map);
 
     map.on('load', () => {
-      setupMapLayers(map);
+      const hazards = getActiveHazardFeatures(navMode, groundDangerZones, droneHazards);
+      setupMapLayers(
+        map,
+        hazards,
+        getDirectRouteCoords(),
+        getBalancedRouteCoords(),
+        getSafeRouteCoords(),
+        activePathCoordinates,
+        activeRouteColor
+      );
+    });
+
+    map.on('move', () => {
+      const center = map.getCenter();
+      if (onMapCenterChange) {
+        onMapCenterChange([center.lng, center.lat]);
+      }
     });
 
     map.on('click', (e) => {
-      const coords: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+      const coords: GeoPoint = [e.lngLat.lng, e.lngLat.lat];
       if (pickingModeRef.current === 'PICK_A') {
         onOriginChange(coords);
         onPickingComplete();
@@ -175,95 +255,35 @@ export const RealMapQuarterView: React.FC<Props> = ({
     };
   }, []);
 
-  const updateOriginPin = (el: HTMLElement, mode: NavMode) => {
-    if (mode === 'DRONE_SKYWAY') {
-      el.innerHTML = `
-        <div class="relative flex items-center justify-center w-10 h-10">
-          <div class="absolute inset-0 rounded-full bg-cyan-500/30 animate-ping"></div>
-          <div class="w-8 h-8 rounded-full bg-slate-950/90 border-2 border-cyan-400 text-cyan-300 flex items-center justify-center font-mono font-bold text-[11px] shadow-2xl shadow-cyan-500/80">
-            H1
-          </div>
-        </div>
-      `;
-    } else {
-      el.innerHTML = `
-        <div class="flex items-center justify-center w-8 h-8 rounded-full bg-cyan-500/90 text-white font-mono font-bold text-xs border-2 border-white shadow-xl shadow-cyan-500/50">
-          A
-        </div>
-      `;
-    }
-  };
-
-  const updateDestPin = (el: HTMLElement, mode: NavMode) => {
-    if (mode === 'DRONE_SKYWAY') {
-      el.innerHTML = `
-        <div class="relative flex items-center justify-center w-10 h-10">
-          <div class="absolute inset-0 rounded-full bg-emerald-500/30 animate-ping"></div>
-          <div class="w-8 h-8 rounded-full bg-slate-950/90 border-2 border-emerald-400 text-emerald-300 flex items-center justify-center font-mono font-bold text-[11px] shadow-2xl shadow-emerald-500/80">
-            H2
-          </div>
-        </div>
-      `;
-    } else {
-      el.innerHTML = `
-        <div class="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500/90 text-white font-mono font-bold text-xs border-2 border-white shadow-xl shadow-emerald-500/50">
-          B
-        </div>
-      `;
-    }
-  };
-
-  const updateVehicleMarkerIcon = (el: HTMLElement, mode: NavMode) => {
-    if (mode === 'DRONE_SKYWAY') {
-      el.innerHTML = `
-        <div class="relative flex flex-col items-center justify-center w-14 h-14">
-          <!-- Altitude Laser Ground Projection -->
-          <div class="absolute -bottom-6 w-1 h-6 bg-gradient-to-b from-cyan-400 to-transparent opacity-80 animate-pulse"></div>
-          <!-- 3D Quadcopter Airframe with Spinning Rotors -->
-          <div class="relative w-10 h-10 rounded-full bg-slate-950/95 border-2 border-cyan-400 flex items-center justify-center shadow-2xl shadow-cyan-500">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin duration-700">
-              <path d="M12 2v20M2 12h20"/>
-              <circle cx="12" cy="12" r="3" fill="#06b6d4"/>
-            </svg>
-            <div class="absolute -top-1 -left-1 w-2.5 h-2.5 rounded-full bg-cyan-400/80 animate-ping"></div>
-            <div class="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-cyan-400/80 animate-ping"></div>
-          </div>
-        </div>
-      `;
-    } else {
-      el.innerHTML = `
-        <div class="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500/90 border-2 border-white text-white shadow-2xl shadow-emerald-500/80">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="12 2 19 21 12 17 5 21 12 2" fill="white" stroke="none"/>
-          </svg>
-        </div>
-      `;
-    }
-  };
-
+  // Mode updates for markers
   useEffect(() => {
+    const isModeOsint = navMode === 'GLOBAL_OSINT';
     if (vehicleMarkerRef.current) {
-      updateVehicleMarkerIcon(vehicleMarkerRef.current.getElement(), navMode);
+      vehicleMarkerRef.current.getElement().style.display = isModeOsint ? 'none' : 'flex';
+      if (!isModeOsint) updateVehicleMarkerIcon(vehicleMarkerRef.current.getElement(), navMode);
     }
     if (originMarkerRef.current) {
-      updateOriginPin(originMarkerRef.current.getElement(), navMode);
+      originMarkerRef.current.getElement().style.display = isModeOsint ? 'none' : 'flex';
+      if (!isModeOsint) updateOriginPin(originMarkerRef.current.getElement(), navMode);
     }
     if (destMarkerRef.current) {
-      updateDestPin(destMarkerRef.current.getElement(), navMode);
+      destMarkerRef.current.getElement().style.display = isModeOsint ? 'none' : 'flex';
+      if (!isModeOsint) updateDestPin(destMarkerRef.current.getElement(), navMode);
+    }
+
+    if (isModeOsint && mapRef.current) {
+      mapRef.current.flyTo({
+        zoom: 2.8,
+        pitch: 35,
+        bearing: -10,
+        duration: 1800
+      });
     }
   }, [navMode]);
 
-  const pickingModeRef = useRef(pickingMode);
+  // City / Corridor changes
   useEffect(() => {
-    pickingModeRef.current = pickingMode;
-    if (mapContainerRef.current) {
-      mapContainerRef.current.style.cursor = pickingMode !== 'NONE' ? 'crosshair' : 'grab';
-    }
-  }, [pickingMode]);
-
-  // Fly to location when city or corridor changes
-  useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || isOsint) return;
     const target = isDrone ? droneCorridor : city;
     mapRef.current.flyTo({
       center: target.center,
@@ -272,219 +292,25 @@ export const RealMapQuarterView: React.FC<Props> = ({
       bearing: target.bearing || -20,
       duration: 1600
     });
-  }, [city, droneCorridor, isDrone]);
+  }, [city, droneCorridor, isDrone, isOsint]);
 
+  // Waypoints update
   useEffect(() => {
     if (originMarkerRef.current) originMarkerRef.current.setLngLat(origin);
     if (destMarkerRef.current) destMarkerRef.current.setLngLat(destination);
   }, [origin, destination]);
 
+  // Camera Mode changes
   useEffect(() => {
     if (!mapRef.current) return;
     if (cameraMode === 'QUARTER_VIEW') {
       mapRef.current.easeTo({ pitch: 58, duration: 800 });
     } else if (cameraMode === 'TOP_DOWN') {
       mapRef.current.easeTo({ pitch: 0, bearing: 0, duration: 800 });
+    } else if (cameraMode === 'ORBITAL_WIDE') {
+      mapRef.current.flyTo({ zoom: 2.2, pitch: 35, bearing: 0, duration: 1500 });
     }
   }, [cameraMode]);
-
-  // Setup Layers for ALL THREE ROUTES Simultaneously
-  const setupMapLayers = (map: maplibregl.Map) => {
-    // 1. Danger/Hazard Polygons GeoJSON
-    const features = getActiveHazardFeatures();
-    map.addSource('hazards-src', {
-      type: 'geojson',
-      data: {
-        type: 'FeatureCollection',
-        features
-      }
-    });
-
-    map.addLayer({
-      id: 'hazards-fill',
-      type: 'fill',
-      source: 'hazards-src',
-      paint: {
-        'fill-color': ['get', 'color'],
-        'fill-opacity': 0.28
-      }
-    });
-
-    map.addLayer({
-      id: 'hazards-line',
-      type: 'line',
-      source: 'hazards-src',
-      paint: {
-        'line-color': ['get', 'color'],
-        'line-width': 2.5,
-        'line-opacity': 0.85
-      }
-    });
-
-    // 2. Direct Unsafe Route Layer (Red)
-    map.addSource('direct-route-src', {
-      type: 'geojson',
-      data: {
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: getDirectRouteCoords()
-        }
-      }
-    });
-
-    map.addLayer({
-      id: 'direct-route-line',
-      type: 'line',
-      source: 'direct-route-src',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: {
-        'line-color': '#ef4444',
-        'line-width': 4.5,
-        'line-opacity': 0.75,
-        'line-dasharray': [2, 2]
-      }
-    });
-
-    // 3. Balanced Route Layer (Blue)
-    map.addSource('balanced-route-src', {
-      type: 'geojson',
-      data: {
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: getBalancedRouteCoords()
-        }
-      }
-    });
-
-    map.addLayer({
-      id: 'balanced-route-line',
-      type: 'line',
-      source: 'balanced-route-src',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: {
-        'line-color': '#3b82f6',
-        'line-width': 4.0,
-        'line-opacity': 0.65
-      }
-    });
-
-    // 4. Safe Guardian Route Layer (Emerald / Cyan)
-    map.addSource('safe-route-src', {
-      type: 'geojson',
-      data: {
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: getSafeRouteCoords()
-        }
-      }
-    });
-
-    map.addLayer({
-      id: 'safe-route-line',
-      type: 'line',
-      source: 'safe-route-src',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: {
-        'line-color': '#10b981',
-        'line-width': 5.0,
-        'line-opacity': 0.7
-      }
-    });
-
-    // 5. Active Selected Route Primary Glow Layer (On Top)
-    map.addSource('active-route-src', {
-      type: 'geojson',
-      data: {
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: activePathCoordinates
-        }
-      }
-    });
-
-    map.addLayer({
-      id: 'active-route-glow',
-      type: 'line',
-      source: 'active-route-src',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: {
-        'line-color': activeRouteColor,
-        'line-width': 18,
-        'line-opacity': 0.5
-      }
-    });
-
-    map.addLayer({
-      id: 'active-route-core',
-      type: 'line',
-      source: 'active-route-src',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: {
-        'line-color': activeRouteColor,
-        'line-width': 6.0,
-        'line-opacity': 1.0
-      }
-    });
-  };
-
-  const getSafeRouteCoords = () => {
-    if (isDrone) return droneRoutes?.safe?.pathCoordinates || [];
-    return groundRoutes?.safe?.pathCoordinates || [];
-  };
-
-  const getBalancedRouteCoords = () => {
-    if (isDrone) return droneRoutes?.rapid?.pathCoordinates || [];
-    return groundRoutes?.balanced?.pathCoordinates || [];
-  };
-
-  const getDirectRouteCoords = () => {
-    if (isDrone) return droneRoutes?.unsafe?.pathCoordinates || [];
-    return groundRoutes?.unsafe?.pathCoordinates || [];
-  };
-
-  const getActiveHazardFeatures = () => {
-    if (isDrone) {
-      return droneHazards.map(h => createDangerZonePolygonGeoJSON({
-        id: h.id,
-        name: h.name,
-        category: 'slum_red_zone',
-        severity: h.severity,
-        riskScore: h.riskScore,
-        center: h.center,
-        radiusMeters: h.radiusMeters,
-        description: h.description,
-        recentIncidentsMonth: 0,
-        reportedCrimes: [],
-        safetyAdvisory: h.safetyAdvisory,
-        color: h.color
-      }));
-    } else {
-      return groundDangerZones.map(z => createDangerZonePolygonGeoJSON(z));
-    }
-  };
 
   // Update Hazard GeoJSON Layer
   useEffect(() => {
@@ -494,12 +320,12 @@ export const RealMapQuarterView: React.FC<Props> = ({
     if (src) {
       src.setData({
         type: 'FeatureCollection',
-        features: getActiveHazardFeatures()
+        features: getActiveHazardFeatures(navMode, groundDangerZones, droneHazards)
       });
     }
-  }, [groundDangerZones, droneHazards, isDrone]);
+  }, [groundDangerZones, droneHazards, navMode]);
 
-  // Update All 3 Route GeoJSON Sources & Active Highlight
+  // Update Route GeoJSON Sources & Active Highlight
   useEffect(() => {
     if (!mapRef.current) return;
     const map = mapRef.current;
@@ -510,7 +336,7 @@ export const RealMapQuarterView: React.FC<Props> = ({
       safeSrc.setData({
         type: 'Feature',
         properties: {},
-        geometry: { type: 'LineString', coordinates: getSafeRouteCoords() }
+        geometry: { type: 'LineString', coordinates: isOsint ? [] : getSafeRouteCoords() }
       });
     }
 
@@ -520,7 +346,7 @@ export const RealMapQuarterView: React.FC<Props> = ({
       balancedSrc.setData({
         type: 'Feature',
         properties: {},
-        geometry: { type: 'LineString', coordinates: getBalancedRouteCoords() }
+        geometry: { type: 'LineString', coordinates: isOsint ? [] : getBalancedRouteCoords() }
       });
     }
 
@@ -530,7 +356,7 @@ export const RealMapQuarterView: React.FC<Props> = ({
       directSrc.setData({
         type: 'Feature',
         properties: {},
-        geometry: { type: 'LineString', coordinates: getDirectRouteCoords() }
+        geometry: { type: 'LineString', coordinates: isOsint ? [] : getDirectRouteCoords() }
       });
     }
 
@@ -540,7 +366,7 @@ export const RealMapQuarterView: React.FC<Props> = ({
       activeSrc.setData({
         type: 'Feature',
         properties: {},
-        geometry: { type: 'LineString', coordinates: activePathCoordinates }
+        geometry: { type: 'LineString', coordinates: isOsint ? [] : activePathCoordinates }
       });
 
       if (map.getLayer('active-route-glow')) {
@@ -550,11 +376,20 @@ export const RealMapQuarterView: React.FC<Props> = ({
         map.setPaintProperty('active-route-core', 'line-color', activeRouteColor);
       }
     }
-  }, [groundRoutes, droneRoutes, activePathCoordinates, activeRouteColor, isDrone]);
+  }, [
+    groundRoutes, 
+    droneRoutes, 
+    activePathCoordinates, 
+    activeRouteColor, 
+    getSafeRouteCoords, 
+    getBalancedRouteCoords, 
+    getDirectRouteCoords,
+    isOsint
+  ]);
 
   // Animate Vehicle / Drone Marker along active route
   useEffect(() => {
-    if (!vehicleMarkerRef.current || activePathCoordinates.length < 2) return;
+    if (!vehicleMarkerRef.current || activePathCoordinates.length < 2 || isOsint) return;
 
     const coords = activePathCoordinates;
     const totalSegments = coords.length - 1;
@@ -568,7 +403,7 @@ export const RealMapQuarterView: React.FC<Props> = ({
 
     const currentLng = p1[0] + (p2[0] - p1[0]) * segT;
     const currentLat = p1[1] + (p2[1] - p1[1]) * segT;
-    const currentPos: [number, number] = [currentLng, currentLat];
+    const currentPos: GeoPoint = [currentLng, currentLat];
 
     vehicleMarkerRef.current.setLngLat(currentPos);
 
@@ -600,11 +435,44 @@ export const RealMapQuarterView: React.FC<Props> = ({
       );
       onVehicleStepChange(stepIdx);
     }
-  }, [simProgress, activePathCoordinates, cameraMode, isDrone, onVehicleStepChange]);
+  }, [simProgress, activePathCoordinates, cameraMode, isDrone, isOsint, onVehicleStepChange, activeDroneRoute, activeGroundRoute]);
 
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainerRef} className="w-full h-full" />
+
+      {/* Situational OSINT MapLibre Layers */}
+      {situationalLayers && (
+        <SituationalLayers
+          map={mapRef.current}
+          layers={situationalLayers}
+          satellites={satellites}
+          flights={flights}
+          earthquakes={earthquakes}
+          facilities={facilities}
+          cctvCameras={cctvCameras}
+          thermalFires={thermalFires}
+          onSelectEntity={onSelectTelemetryEntity || (() => {})}
+        />
+      )}
+
+      {/* Selected Entity Tactical Telemetry Card */}
+      {selectedTelemetryEntity && (
+        <TacticalEntityCard
+          entity={selectedTelemetryEntity}
+          onClose={onCloseTelemetryEntity || (() => {})}
+          onFocusCoordinates={(coords) => {
+            if (mapRef.current) {
+              mapRef.current.flyTo({
+                center: coords,
+                zoom: 8.0,
+                pitch: 45,
+                duration: 1600
+              });
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
