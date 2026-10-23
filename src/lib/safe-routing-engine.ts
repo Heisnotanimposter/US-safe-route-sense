@@ -54,7 +54,7 @@ export async function fetchPhysicalRoadRoute(
   routeType: RouteType
 ): Promise<RouteOption> {
   try {
-    let waypoints: [number, number][] = [origin];
+    const waypoints: [number, number][] = [origin];
 
     if (routeType === 'SAFE_GUARDIAN') {
       // Wide safe perimeter detour bypassing all danger zones (Lakefront / Outer Highway)
