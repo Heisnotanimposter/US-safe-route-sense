@@ -466,7 +466,7 @@ public struct QuarterViewMapView: View {
                         Label("SAFE GUARDIAN ACTIVE", systemImage: "shield.checkered")
                             .font(.caption.bold())
                             .foregroundColor(.green)
-                        Text("Safety Index: \(safeRoute.safetyScore)%")
+                        Text("Safety Index: \\(safeRoute.safetyScore)%")
                             .font(.title3.bold())
                             .foregroundColor(.white)
                     }
